@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6f5c">
+<title>Raça Cão</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --verde:#1f6f5c; --creme:#f4e9d8; --fundo:#10201c; --txt:#eef3f1; --cinza:#8aa39b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--fundo); color:var(--txt); min-height:100vh; }
+  header { padding:14px 16px 6px; display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:20px; margin:0; }
+  header small { color:var(--cinza); display:block; font-size:12px; }
+  main { padding:8px 16px 32px; max-width:560px; margin:0 auto; }
+  .camara { position:relative; width:100%; aspect-ratio:3/4; background:#000; border-radius:16px; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:cover; display:block; }
+  .mira { position:absolute; inset:12%; border:2px dashed rgba(244,233,216,.55); border-radius:14px; pointer-events:none; }
+  .rec { position:absolute; top:12px; left:12px; background:#c0392b; color:#fff; padding:4px 10px; border-radius:20px; font-size:13px; font-weight:600; display:none; }
+  .rec.on { display:block; animation:pisca 1s infinite; }
+  @keyframes pisca { 50% { opacity:.55; } }
+  .barra { position:absolute; left:0; bottom:0; height:6px; background:var(--creme); width:0; transition:width .2s linear; }
+  .aviso { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:var(--cinza); font-size:15px; }
+  .dur { display:flex; gap:8px; margin:14px 0 10px; }
+  .dur button { flex:1; padding:10px; border-radius:12px; border:1px solid #2d4a42; background:#17302a; color:var(--txt); font-size:15px; }
+  .dur button.sel { background:var(--verde); border-color:var(--creme); }
+  .acoes { display:flex; gap:10px; }
+  .btn { flex:1; padding:16px; border:0; border-radius:14px; font-size:17px; font-weight:700; background:var(--creme); color:#1b2b26; }
+  .btn.sec { background:#17302a; color:var(--txt); border:1px solid #2d4a42; font-weight:600; flex:0 0 auto; padding:16px 14px; }
+  .btn:disabled { opacity:.45; }
+  #estado { margin:12px 2px; color:var(--cinza); font-size:14px; min-height:20px; }
+  .res { background:#17302a; border:1px solid #2d4a42; border-radius:16px; padding:16px; margin-top:6px; display:none; }
+  .res.on { display:block; }
+  .res h2 { margin:0 0 4px; font-size:22px; }
+  .res .en { color:var(--cinza); font-size:13px; margin-bottom:12px; }
+  .linha { margin:10px 0; }
+  .linha .n { display:flex; justify-content:space-between; font-size:15px; margin-bottom:4px; }
+  .linha .b { height:8px; background:#0e1d19; border-radius:8px; overflow:hidden; }
+  .linha .b i { display:block; height:100%; background:var(--creme); border-radius:8px; }
+  .nota { font-size:13px; color:var(--cinza); margin-top:12px; line-height:1.4; }
+  .semcao h2 { color:#e8a37c; }
+  input[type=file] { display:none; }
+  canvas { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon-192.png" width="40" height="40" alt="" style="border-radius:10px">
+  <div><h1>Raça Cão</h1><small>Identifica a raça com um vídeo curto</small></div>
+</header>
+<main>
+  <div class="camara">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="mira"></div>
+    <div class="rec" id="rec">● 0 s</div>
+    <div class="barra" id="barra"></div>
+    <div class="aviso" id="aviso">A ligar a câmara…</div>
+  </div>
+
+  <div class="dur">
+    <button data-s="5" class="sel">5 segundos</button>
+    <button data-s="10">10 segundos</button>
+  </div>
+  <div class="acoes">
+    <button class="btn" id="gravar" disabled>A carregar modelo…</button>
+    <button class="btn sec" id="galeria" title="Escolher vídeo da galeria">🎞️ Galeria</button>
+    <button class="btn sec" id="virar" title="Trocar câmara">🔄</button>
+  </div>
+  <input type="file" id="ficheiro" accept="video/*">
+  <div id="estado"></div>
+
+  <div class="res" id="res"></div>
+  <canvas id="tela" width="224" height="224"></canvas>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
+<script>
+// Raças de cão do ImageNet (índices 151 a 268), pela mesma ordem do modelo: [inglês, português]
+const RACAS = [
+ ["Chihuahua","Chihuahua"],["Japanese spaniel","Spaniel japonês (Chin)"],["Maltese dog","Bichon maltês"],["Pekinese","Pequinês"],
+ ["Shih-Tzu","Shih Tzu"],["Blenheim spaniel","Cavalier King Charles"],["Papillon","Papillon"],["Toy terrier","Toy terrier"],
+ ["Rhodesian ridgeback","Rhodesian ridgeback"],["Afghan hound","Galgo afegão"],["Basset","Basset hound"],["Beagle","Beagle"],
+ ["Bloodhound","Cão de Santo Humberto"],["Bluetick","Bluetick coonhound"],["Black-and-tan coonhound","Coonhound preto e castanho"],["Walker hound","Treeing Walker coonhound"],
+ ["English foxhound","Foxhound inglês"],["Redbone","Redbone coonhound"],["Borzoi","Borzoi (galgo russo)"],["Irish wolfhound","Lébrel irlandês"],
+ ["Italian greyhound","Galgo italiano"],["Whippet","Whippet"],["Ibizan hound","Podengo ibicenco"],["Norwegian elkhound","Elkhound norueguês"],
+ ["Otterhound","Otterhound"],["Saluki","Saluki"],["Scottish deerhound","Deerhound escocês"],["Weimaraner","Braco de Weimar"],
+ ["Staffordshire bullterrier","Staffordshire bull terrier"],["American Staffordshire terrier","American Staffordshire terrier"],["Bedlington terrier","Bedlington terrier"],["Border terrier","Border terrier"],
+ ["Kerry blue terrier","Kerry blue terrier"],["Irish terrier","Terrier irlandês"],["Norfolk terrier","Norfolk terrier"],["Norwich terrier","Norwich terrier"],
+ ["Yorkshire terrier","Yorkshire terrier"],["Wire-haired fox terrier","Fox terrier de pelo cerdoso"],["Lakeland terrier","Lakeland terrier"],["Sealyham terrier","Sealyham terrier"],
+ ["Airedale","Airedale terrier"],["Cairn","Cairn terrier"],["Australian terrier","Terrier australiano"],["Dandie Dinmont","Dandie Dinmont terrier"],
+ ["Boston bull","Boston terrier"],["Miniature schnauzer","Schnauzer miniatura"],["Giant schnauzer","Schnauzer gigante"],["Standard schnauzer","Schnauzer médio"],
+ ["Scotch terrier","Scottish terrier"],["Tibetan terrier","Terrier tibetano"],["Silky terrier","Silky terrier"],["Soft-coated wheaten terrier","Wheaten terrier de pelo macio"],
+ ["West Highland white terrier","West Highland white terrier (Westie)"],["Lhasa","Lhasa apso"],["Flat-coated retriever","Flat-coated retriever"],["Curly-coated retriever","Curly-coated retriever"],
+ ["Golden retriever","Golden retriever"],["Labrador retriever","Labrador retriever"],["Chesapeake Bay retriever","Chesapeake Bay retriever"],["German short-haired pointer","Braco alemão de pelo curto"],
+ ["Vizsla","Vizsla (braco húngaro)"],["English setter","Setter inglês"],["Irish setter","Setter irlandês"],["Gordon setter","Setter Gordon"],
+ ["Brittany spaniel","Épagneul bretão"],["Clumber","Clumber spaniel"],["English springer","Springer spaniel inglês"],["Welsh springer spaniel","Springer spaniel galês"],
+ ["Cocker spaniel","Cocker spaniel"],["Sussex spaniel","Sussex spaniel"],["Irish water spaniel","Spaniel de água irlandês"],["Kuvasz","Kuvasz"],
+ ["Schipperke","Schipperke"],["Groenendael","Pastor belga Groenendael"],["Malinois","Pastor belga Malinois"],["Briard","Briard (pastor de Brie)"],
+ ["Kelpie","Kelpie australiano"],["Komondor","Komondor"],["Old English sheepdog","Bobtail (Old English sheepdog)"],["Shetland sheepdog","Pastor de Shetland"],
+ ["Collie","Collie"],["Border collie","Border collie"],["Bouvier des Flandres","Boiadeiro da Flandres"],["Rottweiler","Rottweiler"],
+ ["German shepherd","Pastor alemão"],["Doberman","Dobermann"],["Miniature pinscher","Pinscher miniatura"],["Greater Swiss Mountain dog","Grande boiadeiro suíço"],
+ ["Bernese mountain dog","Boiadeiro bernês"],["Appenzeller","Boiadeiro de Appenzell"],["EntleBucher","Boiadeiro de Entlebuch"],["Boxer","Boxer"],
+ ["Bull mastiff","Bullmastiff"],["Tibetan mastiff","Mastim tibetano"],["French bulldog","Bulldog francês"],["Great Dane","Dogue alemão"],
+ ["Saint Bernard","São Bernardo"],["Eskimo dog","Cão esquimó"],["Malamute","Malamute do Alasca"],["Siberian husky","Husky siberiano"],
+ ["Dalmatian","Dálmata"],["Affenpinscher","Affenpinscher"],["Basenji","Basenji"],["Pug","Pug (carlino)"],
+ ["Leonberg","Leonberger"],["Newfoundland","Terra-Nova"],["Great Pyrenees","Cão de montanha dos Pirenéus"],["Samoyed","Samoiedo"],
+ ["Pomeranian","Lulu da Pomerânia (Spitz anão)"],["Chow","Chow chow"],["Keeshond","Keeshond (Spitz lobo)"],["Brabancon griffon","Grifo de Bruxelas / Brabançon"],
+ ["Pembroke","Welsh corgi Pembroke"],["Cardigan","Welsh corgi Cardigan"],["Toy poodle","Caniche toy"],["Miniature poodle","Caniche anão"],
+ ["Standard poodle","Caniche grande"],["Mexican hairless","Cão pelado mexicano (Xoloitzcuintle)"]
+];
+const IDX0 = 151, IDX1 = 268;
+
+const $ = id => document.getElementById(id);
+const video = $('video'), tela = $('tela'), ctx = tela.getContext('2d', { willReadFrequently: true });
+let modelo = null, stream = null, frente = false, duracao = 5, ocupado = false;
+
+// --- Duração ---
+document.querySelectorAll('.dur button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.dur button').forEach(x => x.classList.remove('sel'));
+  b.classList.add('sel'); duracao = +b.dataset.s;
+  if (modelo && !ocupado) $('gravar').textContent = `● Gravar ${duracao} s`;
+});
+
+// --- Câmara ---
+async function ligarCamara() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: frente ? 'user' : 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
+      audio: false
+    });
+    video.srcObject = stream; await video.play();
+    $('aviso').style.display = 'none';
+  } catch (e) {
+    $('aviso').style.display = 'flex';
+    $('aviso').textContent = 'Sem acesso à câmara. Autoriza a câmara nas definições do navegador (o site tem de estar em https) ou usa um vídeo da galeria.';
+  }
+}
+$('virar').onclick = () => { frente = !frente; ligarCamara(); };
+
+// --- Modelo ---
+async function carregarModelo() {
+  try {
+    await tf.ready();
+    modelo = await mobilenet.load({ version: 2, alpha: 1.0 });
+    // aquecimento
+    tf.tidy(() => modelo.infer(tf.zeros([224, 224, 3])));
+    $('gravar').disabled = false; $('gravar').textContent = `● Gravar ${duracao} s`;
+    $('estado').textContent = 'Pronto. Enquadra o cão e grava. Movimenta-te devagar à volta dele.';
+  } catch (e) {
+    $('gravar').textContent = 'Erro no modelo';
+    $('estado').textContent = 'Não foi possível carregar o modelo. Na 1.ª utilização precisas de internet.';
+  }
+}
+
+// Recorta o centro do vídeo para 224x224 e devolve as probabilidades das raças + prob. total de "cão"
+function analisarFrame(fonte) {
+  const w = fonte.videoWidth, h = fonte.videoHeight; if (!w || !h) return null;
+  const lado = Math.min(w, h) * 0.85, sx = (w - lado) / 2, sy = (h - lado) / 2;
+  ctx.drawImage(fonte, sx, sy, lado, lado, 0, 0, 224, 224);
+  return tf.tidy(() => {
+    const probs = tf.softmax(modelo.infer(tela)).dataSync();
+    const caes = Array.from(probs.slice(IDX0, IDX1 + 1));
+    const totalCao = caes.reduce((a, b) => a + b, 0);
+    return { caes, totalCao };
+  });
+}
+
+function agregar(frames) {
+  const bons = frames.filter(f => f && f.totalCao > 0.25);
+  const media = new Array(RACAS.length).fill(0);
+  bons.forEach(f => {
+    // frames onde o cão é mais nítido pesam mais
+    f.caes.forEach((p, i) => media[i] += p);
+  });
+  const soma = media.reduce((a, b) => a + b, 0) || 1;
+  const ranking = media.map((v, i) => ({ i, p: v / soma })).sort((a, b) => b.p - a.p);
+  return { ranking, nBons: bons.length, nTotal: frames.length };
+}
+
+function mostrar({ ranking, nBons, nTotal }) {
+  const r = $('res'); r.classList.add('on'); r.classList.remove('semcao');
+  if (nTotal === 0 || nBons / nTotal < 0.2) {
+    r.classList.add('semcao');
+    r.innerHTML = `<h2>Nenhum cão detetado</h2>
+      <div class="nota">Só ${nBons} de ${nTotal} imagens pareciam ter um cão. Aproxima-te, garante boa luz e mantém o cão dentro do quadrado tracejado.</div>`;
+    return;
+  }
+  const top = ranking.slice(0, 3), p1 = top[0].p;
+  let conf = p1 > 0.6 ? 'Confiança alta' : p1 > 0.35 ? 'Confiança média' : 'Confiança baixa — pode ser cruzado';
+  r.innerHTML = `<h2>${RACAS[top[0].i][1]}</h2>
+    <div class="en">${RACAS[top[0].i][0]} · ${conf}</div>
+    ${top.map(t => `<div class="linha"><div class="n"><span>${RACAS[t.i][1]}</span><b>${Math.round(t.p * 100)}%</b></div>
+      <div class="b"><i style="width:${Math.max(2, t.p * 100)}%"></i></div></div>`).join('')}
+    <div class="nota">Analisadas ${nTotal} imagens, ${nBons} com cão visível.
+    ${p1 < 0.35 ? 'Resultado repartido entre raças: é provável que seja um cruzamento.' : ''}
+    Reconhece 118 raças; raças fora desta lista (ex.: Podengo, Cão da Serra da Estrela) aparecem como a mais parecida.</div>`;
+}
+
+// --- Gravação pela câmara (amostra ~3 imagens por segundo) ---
+$('gravar').onclick = async () => {
+  if (!modelo || ocupado || !stream) return;
+  ocupado = true; $('res').classList.remove('on');
+  $('gravar').disabled = true; $('galeria').disabled = true; $('virar').disabled = true;
+  const frames = [], inicio = performance.now(), totalMs = duracao * 1000;
+  $('rec').classList.add('on');
+  await new Promise(fim => {
+    function passo() {
+      const t = performance.now() - inicio;
+      $('rec').textContent = `● ${Math.ceil((totalMs - t) / 1000)} s`;
+      $('barra').style.width = Math.min(100, t / totalMs * 100) + '%';
+      frames.push(analisarFrame(video));
+      $('estado').textContent = `A analisar… ${frames.length} imagens`;
+      if (t < totalMs) setTimeout(passo, 330); else fim();
+    }
+    passo();
+  });
+  $('rec').classList.remove('on'); $('barra').style.width = '0';
+  mostrar(agregar(frames));
+  $('estado').textContent = 'Concluído. Podes gravar outra vez.';
+  if (navigator.vibrate) navigator.vibrate(80);
+  ocupado = false;
+  $('gravar').disabled = false; $('galeria').disabled = false; $('virar').disabled = false;
+  $('gravar').textContent = `● Gravar ${duracao} s`;
+};
+
+// --- Vídeo da galeria ---
+$('galeria').onclick = () => $('ficheiro').click();
+$('ficheiro').onchange = async e => {
+  const f = e.target.files[0]; if (!f || !modelo || ocupado) return;
+  ocupado = true; $('res').classList.remove('on'); $('gravar').disabled = true;
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.src = URL.createObjectURL(f);
+  await new Promise((ok, erro) => { v.onloadeddata = ok; v.onerror = erro; }).catch(() => {});
+  const dur = Math.min(v.duration || 0, 20), n = Math.max(6, Math.min(40, Math.round(dur * 3)));
+  const frames = [];
+  for (let k = 0; k < n; k++) {
+    v.currentTime = (dur * (k + 0.5)) / n;
+    await new Promise(ok => { v.onseeked = ok; setTimeout(ok, 1500); });
+    frames.push(analisarFrame(v));
+    $('estado').textContent = `A analisar vídeo… ${k + 1}/${n}`;
+    $('barra').style.width = ((k + 1) / n * 100) + '%';
+  }
+  URL.revokeObjectURL(v.src); $('barra').style.width = '0'; e.target.value = '';
+  mostrar(agregar(frames));
+  $('estado').textContent = 'Vídeo analisado.';
+  ocupado = false; $('gravar').disabled = false;
+};
+
+// --- Arranque ---
+ligarCamara();
+carregarModelo();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
